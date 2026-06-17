@@ -9,6 +9,7 @@ Task -1: Analysis of tree cover loss from 2000-2025 (based on Global Forest Chan
 library(sf)
 library(terra)
 library(tmap)
+library(dplyr)
 ```
 
 
@@ -212,3 +213,92 @@ tm_shape(final_shp) +
   tm_borders(col = "red", lwd = 0.5, lty = "dashed")
 
 ```
+
+
+Calculate the area
+```{r}
+final_shp$area_m2 <- st_area(final_shp)
+
+final_shp$area_ha <- as.numeric(final_shp$area_m2) / 10000
+```
+
+
+check
+```{r}
+head(final_shp)
+```
+
+
+Add years
+```{r}
+final_shp$year <- final_shp$Year + 2000
+```
+
+
+check
+```{r}
+head(final_shp)
+```
+
+
+Summarize by year
+```{r}
+annual_area <- final_shp %>%
+  group_by(year) %>%
+  summarise(
+    area_ha = sum(area_ha, na.rm = TRUE)
+  )
+```
+
+
+
+check
+```{r}
+head(annual_area)
+```
+
+
+
+area in 2021
+```{r}
+area_2021 <- annual_area %>%
+  filter(year == 2021)
+```
+
+
+area in 2008-2025
+```{r}
+total_2008_2025 <- annual_area %>%
+  filter(year >= 2008 & year <= 2025) %>%
+  summarise(area_ha = sum(area_ha))
+```
+
+
+
+area 2021-2025
+```{r}
+total_2021_2025 <- annual_area %>%
+  filter(year >= 2021 & year <= 2025) %>%
+  summarise(area_ha = sum(area_ha))
+```
+
+
+
+Create the final table
+```{r}
+results <- data.frame(
+  Period = c(
+    "Deforestation in 2021",
+    "Total 2008-2025",
+    "Total 2021-2025"
+  ),
+  Area_ha = c(
+    area_2021$area_ha,
+    total_2008_2025$area_ha,
+    total_2021_2025$area_ha
+  )
+)
+
+results
+```
+
