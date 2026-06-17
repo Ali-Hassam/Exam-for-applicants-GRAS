@@ -1,0 +1,214 @@
+---
+title: "Exam for applicants – GRAS - Hassam Ali"
+output: html_notebook
+---
+
+
+Task -1: Analysis of tree cover loss from 2000-2025 (based on Global Forest Change data)
+```{r}
+library(sf)
+library(terra)
+library(tmap)
+```
+
+
+Read point shapefile and reproject it to EPSG:5387
+```{r}
+pt <- st_read("D:/GRAS/study_point.shp")
+pt_utm <- st_transform(pt, 5387)
+
+#display crs info for a quick check
+st_crs(pt_utm)
+
+```
+
+
+Create a 25km buffer and save it
+```{r}
+#increase the 'nQuadSegs' to get a more smooth and a very accurate buffer
+buffer <- st_buffer(pt_utm, dist = 25000, nQuadSegs = 10000)
+
+st_write(buffer, "D:/GRAS/study_area.shp", driver = "ESRI Shapefile", append=FALSE)
+```
+
+
+Read deforestation raster
+```{r}
+rast <- rast("D:/GRAS/Hansen_GFC-2025-v1.13_lossyear_00N_080W.tif")
+
+rast
+```
+
+
+Reproject, Crop & Clip the deforestation Raster
+```{r}
+# 1. Convert sf -> SpatVector
+buffer_v <- vect(buffer)
+
+# 2. Reproject buffer to raster CRS
+temp_buffer <- project(buffer_v, crs(rast))
+
+# 3. Crop raster in its native CRS
+rast_crop <- crop(rast, temp_buffer)
+
+# 4. Reproject cropped raster to EPSG:5387
+rast_utm  <- project(rast_crop, "EPSG:5387", method="near")
+
+# 5. Reproject buffer to EPSG:5387
+buffer_utm <- project(buffer_v, "EPSG:5387")
+
+# 6. Mask
+rast_clip <- mask(rast_utm, buffer_utm)
+
+
+```
+
+
+Save the clipped Raster
+```{r}
+writeRaster(rast_clip, "D:/GRAS/Deforest_clip.tif", overwrite = TRUE)
+```
+```{r}
+Sys.unsetenv("PROJ_LIB")
+
+```
+
+
+Remove the 0 value where no forest loss occurred
+```{r}
+rast_clip[rast_clip == 0] <- NA
+
+plot(rast_clip)
+```
+
+
+Vectorize the raster without the no-data values and save as a shapefile
+```{r}
+rast_poly <- as.polygons(
+  rast_clip,
+  dissolve = TRUE,
+  na.rm = TRUE
+)
+
+rast_poly_sf <- st_as_sf(rast_poly) #this time convert SpatVector -> sf
+st_write(rast_poly_sf, "D:/GRAS/deforestation.shp", append=FALSE)
+```
+
+
+Check the issue with the field name
+```{r}
+shp <- st_read("D:/GRAS/deforestation.shp")
+names(shp)
+```
+
+
+```{r}
+head(shp)
+```
+
+
+Year went into H_GFC.2 , Rename it to year
+```{r}
+names(shp)[names(shp) == "H_GFC.2"] <- "Year"
+```
+
+
+Save the updated file
+```{r}
+st_write(shp, "D:/GRAS/deforestation.shp", delete_dsn = TRUE)
+```
+
+
+Static Plot
+```{r}
+final_shp <- st_read("D:/GRAS/deforestation.shp")
+
+tmap_mode("plot")
+
+tm_shape(final_shp) +
+  tm_polygons(
+    col = "Year",
+    palette = "Spectral",
+    style = "cat",
+    title = "Year-wise Deforestation",
+    border.col = NA,
+    showNA = FALSE,
+    drop.levels = TRUE
+    
+  ) +
+  tm_shape(buffer) +
+  tm_borders(col = "black", lwd = 2)
+```
+
+Interactive map with additional layers and custom color Platte
+```{r}
+final_shp <- st_read("D:/GRAS/deforestation.shp")
+buffer <- st_read("D:/GRAS/study_area.shp")
+#Custom Color Platte created with the help of ColorBrewer
+cols <- colorRampPalette(
+  c(
+  "#5C0303", "#8B1101", "#CE2D04", "#FF2B05",
+  "#F97C1D", "#FEB130", "#CCC53A", "#DBE236",
+  "#C8F735", "#8BFF4B", "#52FA7A", "#22EBAA",
+  "#1AD4D0", "#2FB2F4", "#458CFD", "#4666DD",
+  "#3F3E9C", "#150183"
+  )
+)(25)
+
+
+#Read /load the layers
+places <- st_read("D:/GRAS/Places.shp")
+prot_area <- st_read("D:/GRAS/Protected Areas.shp")
+rivers <- st_read("D:/GRAS/Rivers & Streams.shp")
+tracks <- st_read("D:/GRAS/Roads and Tracks.shp")
+
+rivers      <- st_transform(rivers,      st_crs(final_shp))
+tracks      <- st_transform(tracks,      st_crs(final_shp))
+places      <- st_transform(places,      st_crs(final_shp))
+prot_area   <- st_transform(prot_area,   st_crs(final_shp))
+buffer      <- st_transform(buffer,      st_crs(final_shp))
+
+tmap_mode("view")
+tm_basemap(
+  server = "Esri.WorldTopoMap"
+) +
+tm_shape(final_shp) +
+  tm_polygons(
+    col = "Year",
+    palette = cols,
+    style = "cat",
+    title = "Year-wise Deforestation",
+    border.col = NA,
+    showNA = FALSE,
+    drop.levels = TRUE
+  ) +
+
+  # Rivers in blue
+  tm_shape(rivers) +
+  tm_lines(col = "#0087ff", lwd = 2) +
+
+  # Tracks in dark grey
+  tm_shape(tracks) +
+  tm_lines(col = "grey20", lwd = 1.5) +
+
+  # Protected area with dotted fill
+  tm_shape(prot_area) +
+  tm_polygons(
+    col = NA,
+    border.col = "darkgreen",
+    lwd = 1.5,
+    fill = "darkgreen",
+    fill_alpha = 0.15,
+    lty = "dotted"
+  ) +
+
+  # Places as points with labels
+  tm_shape(places) +
+  tm_symbols(col = "red", size = 0.1) +
+  tm_text("name", size = 0.9, col = "black", ymod = -0.5) +
+
+  # Buffer boundary
+  tm_shape(buffer) +
+  tm_borders(col = "red", lwd = 0.5, lty = "dashed")
+
+```
